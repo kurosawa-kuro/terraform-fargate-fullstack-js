@@ -9,8 +9,8 @@ locals {
   prefix        = "api-8000-public-01"
   account_id    = "503561449641"
   region        = "ap-northeast-1"
-  ecr_repo_name = "backend-express-8000"
-  ecr_image     = "${local.account_id}.dkr.ecr.${local.region}.amazonaws.com/${local.ecr_repo_name}"
+  # ECR設定を削除し、Docker Hubイメージを使用
+  docker_image  = "kurosawakuro/backend-express-8000"
 
   # SSMパラメータのプレフィックス
   ssm_prefix = "/${local.prefix}"
@@ -220,7 +220,7 @@ resource "aws_ecs_task_definition" "express_task" {
   container_definitions = jsonencode([
     {
       name      = "${local.prefix}-container"
-      image     = local.ecr_image
+      image     = local.docker_image
       essential = true
 
       portMappings = [

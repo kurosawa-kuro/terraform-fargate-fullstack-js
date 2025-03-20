@@ -10,7 +10,7 @@
 @publicPort = 3000
 @publicUrl = http://{{publicIP}}:{{publicPort}}
 
-@serviceUrl = http://api-3000-ssm-04-alb-1957159489.ap-northeast-1.elb.amazonaws.com
+@serviceUrl = http://api-8000-public-01-alb-1080861172.ap-northeast-1.elb.amazonaws.com
 
 # ===========================================
 # 基本アクセステスト
