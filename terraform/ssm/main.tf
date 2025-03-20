@@ -6,20 +6,12 @@ provider "aws" {
 }
 
 locals {
-  prefix        = "api-3000-public-01"
+  prefix        = "api-8000-public-01"
   account_id    = "503561449641"
   region        = "ap-northeast-1"
-  ecr_repo_name = "ecr-api-3000"
-  ecr_image     = "${local.account_id}.dkr.ecr.${local.region}.amazonaws.com/${local.ecr_repo_name}"
 
   # SSMパラメータのプレフィックス
   ssm_prefix = "/${local.prefix}"
-
-  # 1.1 サブネット作成用に AZ と CIDR をまとめる
-  public_subnets = {
-    a = "10.0.1.0/24"
-    c = "10.0.2.0/24"
-  }
 
   # 1.2 SSM パラメータを一括管理（キー名＝環境変数名）
   # type = "SecureString" などパラメータごとに必要なものを指定

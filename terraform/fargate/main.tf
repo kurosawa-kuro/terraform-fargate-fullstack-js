@@ -6,10 +6,10 @@ provider "aws" {
 }
 
 locals {
-  prefix        = "api-3000-public-01"
+  prefix        = "api-8000-public-01"
   account_id    = "503561449641"
   region        = "ap-northeast-1"
-  ecr_repo_name = "ecr-api-3000"
+  ecr_repo_name = "backend-express-8000"
   ecr_image     = "${local.account_id}.dkr.ecr.${local.region}.amazonaws.com/${local.ecr_repo_name}"
 
   # SSMパラメータのプレフィックス
@@ -143,8 +143,8 @@ resource "aws_security_group" "alb_sg" {
 # ALB から ECS への通信を許可
 resource "aws_security_group_rule" "allow_alb_to_ecs" {
   type                     = "ingress"
-  from_port                = 3000
-  to_port                  = 3000
+  from_port                = 8000
+  to_port                  = 8000
   protocol                 = "tcp"
   security_group_id        = aws_security_group.ecs_sg.id
   source_security_group_id = aws_security_group.alb_sg.id
@@ -225,8 +225,8 @@ resource "aws_ecs_task_definition" "express_task" {
 
       portMappings = [
         {
-          containerPort = 3000
-          hostPort      = 3000
+          containerPort = 8000
+          hostPort      = 8000
           protocol      = "tcp"
         }
       ]
@@ -269,7 +269,7 @@ resource "aws_lb" "app_alb" {
 
 resource "aws_lb_target_group" "express_tg" {
   name        = "${local.prefix}-tg"
-  port        = 3000
+  port        = 8000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
@@ -319,7 +319,7 @@ resource "aws_ecs_service" "express_service" {
   load_balancer {
     target_group_arn = aws_lb_target_group.express_tg.arn
     container_name   = "${local.prefix}-container"
-    container_port   = 3000
+    container_port   = 8000
   }
 
   depends_on = [

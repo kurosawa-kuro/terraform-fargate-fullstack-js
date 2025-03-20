@@ -144,3 +144,5 @@ node_modules
 *.log.*
 *.log.*.*
 *.log.*.*.*
+terraform/ssm/terraform.tfstate.backup
+terraform/ssm/terraform.tfstate
