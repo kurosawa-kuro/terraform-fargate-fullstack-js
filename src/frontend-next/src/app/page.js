@@ -2,12 +2,15 @@ import Image from "next/image";
 
 // Express APIからデータを取得する関数
 async function getData() {
-  // 本番環境とローカル環境で適切なURLを使用
-  const apiUrl = 'http://localhost:8000';
-  // const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+  // バックエンドのルーティング構成に基づいてエンドポイントを設定
+  const isLocalDev = process.env.NODE_ENV === 'development';
+  
+  // ローカル開発環境: 直接バックエンドのポートにアクセス
+  // 本番環境: ALBのパスベースルーティングで /api へのリクエストがバックエンドに転送される
+  const apiUrl = isLocalDev ? 'http://localhost:8000/' : '/api';
   
   try {
-    const res = await fetch(`${apiUrl}/`, {
+    const res = await fetch(apiUrl, {
       cache: 'no-store', // SSRで毎回最新データを取得
       headers: {
         'Accept': 'application/json',

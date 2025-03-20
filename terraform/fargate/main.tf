@@ -9,8 +9,9 @@ locals {
   prefix        = "api-8000-public-01"
   account_id    = "503561449641"
   region        = "ap-northeast-1"
-  # ECR設定を削除し、Docker Hubイメージを使用
-  docker_image  = "kurosawakuro/backend-express-8000"
+  # バックエンドとフロントエンドのDockerイメージ
+  backend_image  = "kurosawakuro/backend-express-8000"
+  frontend_image = "kurosawakuro/frontend-nextjs-3000"
 
   # SSMパラメータのプレフィックス
   ssm_prefix = "/${local.prefix}"
@@ -140,15 +141,26 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
-# ALB から ECS への通信を許可
-resource "aws_security_group_rule" "allow_alb_to_ecs" {
+# ALBからバックエンド(8000)への通信許可
+resource "aws_security_group_rule" "allow_alb_to_ecs_backend" {
   type                     = "ingress"
   from_port                = 8000
   to_port                  = 8000
   protocol                 = "tcp"
   security_group_id        = aws_security_group.ecs_sg.id
   source_security_group_id = aws_security_group.alb_sg.id
-  description              = "Allow traffic from ALB to ECS container"
+  description              = "Allow traffic from ALB to ECS container(backend)"
+}
+
+# ALBからフロントエンド(3000)への通信許可
+resource "aws_security_group_rule" "allow_alb_to_ecs_frontend" {
+  type                     = "ingress"
+  from_port                = 3000
+  to_port                  = 3000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_sg.id
+  source_security_group_id = aws_security_group.alb_sg.id
+  description              = "Allow traffic from ALB to ECS container(frontend)"
 }
 
 #########################################
@@ -189,8 +201,13 @@ resource "aws_iam_role_policy_attachment" "ecs_ssm_policy_attachment" {
 #########################################
 # CloudWatch Logs
 #########################################
-resource "aws_cloudwatch_log_group" "express_logs" {
-  name              = "/ecs/${local.prefix}"
+resource "aws_cloudwatch_log_group" "backend_logs" {
+  name              = "/ecs/${local.prefix}-backend"
+  retention_in_days = 7
+}
+
+resource "aws_cloudwatch_log_group" "frontend_logs" {
+  name              = "/ecs/${local.prefix}-frontend"
   retention_in_days = 7
 }
 
@@ -208,8 +225,11 @@ locals {
   ]
 }
 
-resource "aws_ecs_task_definition" "express_task" {
-  family                   = "${local.prefix}-task"
+#########################################
+# ECS Task Definition (バックエンド)
+#########################################
+resource "aws_ecs_task_definition" "backend_task" {
+  family                   = "${local.prefix}-backend-task"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "256"
@@ -219,8 +239,8 @@ resource "aws_ecs_task_definition" "express_task" {
 
   container_definitions = jsonencode([
     {
-      name      = "${local.prefix}-container"
-      image     = local.docker_image
+      name      = "backend"
+      image     = local.backend_image
       essential = true
 
       portMappings = [
@@ -231,13 +251,53 @@ resource "aws_ecs_task_definition" "express_task" {
         }
       ]
 
-      # 上で動的生成した container_secrets をそのまま割り当て
       secrets = local.container_secrets
 
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.express_logs.name
+          "awslogs-group"         = aws_cloudwatch_log_group.backend_logs.name
+          "awslogs-region"        = local.region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+    }
+  ])
+}
+
+#########################################
+# ECS Task Definition (フロントエンド)
+#########################################
+resource "aws_ecs_task_definition" "frontend_task" {
+  family                   = "${local.prefix}-frontend-task"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_execution_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "frontend"
+      image     = local.frontend_image
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = 3000
+          hostPort      = 3000
+          protocol      = "tcp"
+        }
+      ]
+
+      # フロントでSSMを使うなら secrets を指定
+      secrets = local.container_secrets
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.frontend_logs.name
           "awslogs-region"        = local.region
           "awslogs-stream-prefix" = "ecs"
         }
@@ -267,8 +327,9 @@ resource "aws_lb" "app_alb" {
   }
 }
 
-resource "aws_lb_target_group" "express_tg" {
-  name        = "${local.prefix}-tg"
+# バックエンド用ターゲットグループ(ポート8000)
+resource "aws_lb_target_group" "backend_tg" {
+  name        = "${local.prefix}-backend-tg"
   port        = 8000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
@@ -285,28 +346,71 @@ resource "aws_lb_target_group" "express_tg" {
   }
 
   tags = {
-    Name = "${local.prefix}-tg"
+    Name = "${local.prefix}-backend-tg"
   }
 }
 
-resource "aws_lb_listener" "http" {
+# フロントエンド用ターゲットグループ(ポート3000)
+resource "aws_lb_target_group" "frontend_tg" {
+  name        = "${local.prefix}-frontend-tg"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    protocol            = "HTTP"
+    path                = "/"  # Next.jsのヘルスチェックパス
+    port                = "traffic-port"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+  }
+
+  tags = {
+    Name = "${local.prefix}-frontend-tg"
+  }
+}
+
+# ALBのリスナー(ポート80)
+resource "aws_lb_listener" "http_listener" {
   load_balancer_arn = aws_lb.app_alb.arn
   port              = 80
   protocol          = "HTTP"
 
+  # デフォルトアクション: フロントエンドへ転送
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.express_tg.arn
+    target_group_arn = aws_lb_target_group.frontend_tg.arn
+  }
+}
+
+# バックエンドに振り分けるためのルール
+# `/api/*` へアクセスが来た場合に backend_tg へ
+resource "aws_lb_listener_rule" "backend_rule" {
+  listener_arn = aws_lb_listener.http_listener.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend_tg.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
   }
 }
 
 #########################################
-# ECS Service
+# ECS Service (バックエンド)
 #########################################
-resource "aws_ecs_service" "express_service" {
-  name            = "${local.prefix}-service"
+resource "aws_ecs_service" "backend_service" {
+  name            = "${local.prefix}-backend-service"
   cluster         = aws_ecs_cluster.default.id
-  task_definition = aws_ecs_task_definition.express_task.arn
+  task_definition = aws_ecs_task_definition.backend_task.arn
   desired_count   = 1
   launch_type     = "FARGATE"
 
@@ -317,20 +421,53 @@ resource "aws_ecs_service" "express_service" {
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.express_tg.arn
-    container_name   = "${local.prefix}-container"
+    target_group_arn = aws_lb_target_group.backend_tg.arn
+    container_name   = "backend"
     container_port   = 8000
   }
 
   depends_on = [
-    aws_lb_listener.http
+    aws_lb_listener.http_listener,
+    aws_lb_listener_rule.backend_rule
+  ]
+}
+
+#########################################
+# ECS Service (フロントエンド)
+#########################################
+resource "aws_ecs_service" "frontend_service" {
+  name            = "${local.prefix}-frontend-service"
+  cluster         = aws_ecs_cluster.default.id
+  task_definition = aws_ecs_task_definition.frontend_task.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = values(aws_subnet.public)[*].id
+    security_groups  = [aws_security_group.ecs_sg.id]
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.frontend_tg.arn
+    container_name   = "frontend"
+    container_port   = 3000
+  }
+
+  depends_on = [
+    aws_lb_listener.http_listener
   ]
 }
 
 #########################################
 # アウトプット
 #########################################
-output "service_url" {
+output "service_frontend_url" {
   value       = "http://${aws_lb.app_alb.dns_name}"
-  description = "ALBのDNS名（APIサービスのURL）"
+  description = "ALBのDNS名（フロントエンド）"
+}
+
+output "service_backend_url_example" {
+  value       = "http://${aws_lb.app_alb.dns_name}/api"
+  description = "バックエンドへの呼び出し例(/api)"
 }

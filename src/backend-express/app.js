@@ -159,7 +159,11 @@ const appController = {
  * @param {Object} app - Expressアプリケーションインスタンス
  */
 function setupRoutes(app) {
+  // ルートパスでメインページを表示
   app.get("/", appController.showMainPage);
+  
+  // ALBのパスベースルーティング用に /api エンドポイントを追加
+  app.get("/api", appController.showMainPage);
 }
 
 // -----------------------------------------------------------------------------
